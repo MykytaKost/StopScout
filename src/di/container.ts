@@ -8,10 +8,15 @@ import { LoginUser } from "../use-cases/LoginUser";
 
 import { BcryptPasswordHasher } from "../infrastructure/security/BcryptPasswordHasher";
 
+import { ExpoLocationService } from "../infrastructure/location/ExpoLocationService";
+
+import { GetLiveDeparturesUseCase } from "../use-cases/GetLiveDeparturesUseCase";
+
 // Repozytoria
 const stopRepository = new StopRepository();
 const favoriteStopRepository = new FavoriteStopRepository();
 const userRepository = new UserRepository();
+const locationService = new ExpoLocationService();
 
 // Adapter bezpieczeństwa
 const passwordHasher = new BcryptPasswordHasher();
@@ -22,8 +27,10 @@ export const container = {
   favoriteStopRepository,
   userRepository,
   passwordHasher,
+  locationService,
 
   syncStops: new SyncStops(stopRepository),
   registerUser: new RegisterUser(userRepository, passwordHasher),
   loginUser: new LoginUser(userRepository, passwordHasher),
+  getLiveDepartures: new GetLiveDeparturesUseCase(),
 };

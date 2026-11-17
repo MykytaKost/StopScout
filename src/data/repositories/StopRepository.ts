@@ -1,3 +1,5 @@
+import { Coordinates } from "../../domain/value-objects/Coordinates";
+import { GeoBoundingBox } from "../../domain/value-objects/GeoBoundingBox";
 import { Stop } from "../../domain/entities/Stop";
 import { getDatabase } from "../database/database";
 
@@ -22,7 +24,11 @@ export class StopRepository {
     });
   }
 
-  async getAll(): Promise<Stop[]> {
+  async getInBoundingBox(box: GeoBoundingBox): Promise<Stop[]> {
+    if (!box.shouldRenderMarkers()) {
+      return [];
+    }
+
     const db = await getDatabase();
 
     const rows = await db.getAllAsync<{
@@ -31,11 +37,26 @@ export class StopRepository {
       stopLat: number;
       stopLon: number;
       notes: string;
-    }>("SELECT * FROM stops ORDER BY stopName ASC");
+    }>(
+      `SELECT *
+      FROM stops
+      WHERE stopLat BETWEEN ? AND ?
+        AND stopLon BETWEEN ? AND ?
+      ORDER BY stopName`,
+      box.minLat,
+      box.maxLat,
+      box.minLon,
+      box.maxLon,
+    );
 
     return rows.map(
       (row) =>
-        new Stop(row.stopId, row.stopName, row.stopLat, row.stopLon, row.notes),
+        new Stop(
+          row.stopId,
+          row.stopName,
+          new Coordinates(row.stopLat, row.stopLon),
+          row.notes,
+        ),
     );
   }
 }

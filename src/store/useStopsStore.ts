@@ -75,9 +75,14 @@ export const useStopsStore = create<StopsState>((set, get) => ({
     try {
       const stops = await container.syncStops.execute();
       set({ stops });
-    } catch {
+    } catch (error) {
+      console.error("Błąd synchronizacji przystanków:", error);
+
       set({
-        error: "Nie udało się pobrać przystanków z ZTM.",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Nie udało się pobrać przystanków z ZTM.",
       });
     } finally {
       set({ isLoading: false });

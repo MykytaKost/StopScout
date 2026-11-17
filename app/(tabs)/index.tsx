@@ -13,7 +13,7 @@ import {
 import { Stop } from "../../src/domain/entities/Stop";
 import { Departure } from "../../src/domain/entities/Departure";
 import { DepartureCard } from "../../src/components/DepartureCard";
-import { fetchDepartures } from "../../src/infrastructure/api/ztmApi";
+import { container } from "../../src/di/container";
 import { useStopsStore } from "../../src/store/useStopsStore";
 
 export default function DeparturesScreen() {
@@ -58,7 +58,7 @@ export default function DeparturesScreen() {
       setDepartures([]);
 
       try {
-        const result = await fetchDepartures(selectedStopId);
+        const result = await container.getLiveDepartures.execute(selectedStopId);
 
         if (!cancelled) {
           setDepartures(result);

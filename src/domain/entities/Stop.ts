@@ -1,22 +1,23 @@
+import { Coordinates } from "../value-objects/Coordinates";
+
 export class Stop {
   constructor(
     public readonly stopId: number,
     public stopName: string,
-    public stopLat: number,
-    public stopLon: number,
+    public readonly coordinates: Coordinates,
     public notes: string = "",
   ) {
     if (!Number.isFinite(stopId)) {
       throw new Error("Stop ID must be a valid number.");
     }
+  }
 
-    if (!Number.isFinite(stopLat) || stopLat < -90 || stopLat > 90) {
-      throw new Error("Invalid latitude.");
-    }
+  get stopLat(): number {
+    return this.coordinates.latitude;
+  }
 
-    if (!Number.isFinite(stopLon) || stopLon < -180 || stopLon > 180) {
-      throw new Error("Invalid longitude.");
-    }
+  get stopLon(): number {
+    return this.coordinates.longitude;
   }
 
   equals(other: Stop | null | undefined): boolean {

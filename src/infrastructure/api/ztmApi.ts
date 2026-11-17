@@ -1,10 +1,10 @@
 import { Departure } from "../../domain/entities/Departure";
 import type { ZtmDeparturesResponse } from "./ztm.types";
+import { mapZtmDeparture } from "./ZtmApiMapper";
 
 const ZTM_API_URL = "https://ckan2.multimediagdansk.pl/departures";
 
 const DEPARTURE_EXPIRATION_MS = 2 * 60 * 1000;
-
 
 export async function fetchDepartures(
   stopId: number,
@@ -15,7 +15,6 @@ export async function fetchDepartures(
   }
 
   const url = `${ZTM_API_URL}?stopId=${encodeURIComponent(stopId)}`;
-
   const response = await fetch(url);
 
   if (!response.ok) {
@@ -42,15 +41,5 @@ export async function fetchDepartures(
 
       return currentTime - departureTime <= DEPARTURE_EXPIRATION_MS;
     })
-    .map(
-      (departure) =>
-        new Departure(
-          `${departure.id}-${departure.trip}`,
-          departure.routeId,
-          departure.headsign,
-          departure.theoreticalTime,
-          departure.delayInSeconds,
-          departure.estimatedTime,
-        ),
-    );
+    .map(mapZtmDeparture);
 }
