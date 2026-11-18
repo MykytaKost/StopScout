@@ -4,6 +4,45 @@ const DATABASE_NAME = "stopscout.db";
 
 let databasePromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
+async function migrateFavoriteStops(db: SQLite.SQLiteDatabase): Promise<void> {
+  const columns = await db.getAllAsync<{ name: string }>(
+    "PRAGMA table_info(favorite_stops)",
+  );
+
+  // Jeśli kolumna userId już istnieje, migracja została wykonana.
+  if (columns.some((column) => column.name === "userId")) {
+    return;
+  }
+
+  const archive = await db.getAllAsync<{ name: string }>(
+    `SELECT name FROM sqlite_master
+     WHERE type = 'table' AND name = 'favorite_stops_legacy'`,
+  );
+
+  if (archive.length > 0) {
+    throw new Error("Migration stopped: favorite_stops_legacy already exists.");
+  }
+
+  await db.withTransactionAsync(async () => {
+    // Zachowujemy dotychczasową wspólną listę.
+    await db.execAsync(`
+      ALTER TABLE favorite_stops
+      RENAME TO favorite_stops_legacy;
+    `);
+
+    // Tworzymy nową tabelę z ulubionymi przypisanymi do kont.
+    await db.execAsync(`
+      CREATE TABLE favorite_stops (
+        userId INTEGER NOT NULL,
+        stopId INTEGER NOT NULL,
+        PRIMARY KEY (userId, stopId),
+        FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (stopId) REFERENCES stops(stopId) ON DELETE CASCADE
+      );
+    `);
+  });
+}
+
 export function getDatabase(): Promise<SQLite.SQLiteDatabase> {
   if (!databasePromise) {
     databasePromise = (async () => {
@@ -35,16 +74,18 @@ export function getDatabase(): Promise<SQLite.SQLiteDatabase> {
         );
       `);
 
-      const columns = await db.getAllAsync<{ name: string }>(
+      const stopColumns = await db.getAllAsync<{ name: string }>(
         "PRAGMA table_info(stops)",
       );
 
-      if (!columns.some((column) => column.name === "type")) {
+      if (!stopColumns.some((column) => column.name === "type")) {
         await db.execAsync(`
-            ALTER TABLE stops
-            ADD COLUMN type TEXT NOT NULL DEFAULT 'UNKNOWN';
-          `);
+          ALTER TABLE stops
+          ADD COLUMN type TEXT NOT NULL DEFAULT 'UNKNOWN';
+        `);
       }
+
+      await migrateFavoriteStops(db);
 
       return db;
     })().catch((error) => {

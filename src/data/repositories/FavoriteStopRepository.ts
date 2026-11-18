@@ -1,32 +1,32 @@
-
 import { getDatabase } from "../database/database";
 
 export class FavoriteStopRepository {
-  async getAll(): Promise<number[]> {
+  async getAll(userId: number): Promise<number[]> {
     const db = await getDatabase();
 
     const rows = await db.getAllAsync<{ stopId: number }>(
-      "SELECT stopId FROM favorite_stops",
+      "SELECT stopId FROM favorite_stops WHERE userId = ?",
+      [userId],
     );
 
     return rows.map((row) => row.stopId);
   }
 
-  async add(stopId: number): Promise<void> {
+  async add(userId: number, stopId: number): Promise<void> {
     const db = await getDatabase();
 
     await db.runAsync(
-      "INSERT OR IGNORE INTO favorite_stops (stopId) VALUES (?)",
-      [stopId],
+      "INSERT OR IGNORE INTO favorite_stops (userId, stopId) VALUES (?, ?)",
+      [userId, stopId],
     );
   }
 
-  async remove(stopId: number): Promise<void> {
+  async remove(userId: number, stopId: number): Promise<void> {
     const db = await getDatabase();
 
     await db.runAsync(
-      "DELETE FROM favorite_stops WHERE stopId = ?",
-      [stopId],
+      "DELETE FROM favorite_stops WHERE userId = ? AND stopId = ?",
+      [userId, stopId],
     );
   }
 }

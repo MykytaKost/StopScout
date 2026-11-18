@@ -8,6 +8,7 @@ interface StopsState {
   stops: Stop[];
   selectedStop: Stop | null;
   favoriteStopIds: number[];
+  favoriteUserId: number | null;
   isLoading: boolean;
   error: string | null;
 
@@ -17,29 +18,42 @@ interface StopsState {
   setError: (error: string | null) => void;
 
   syncStops: () => Promise<void>;
-  loadFavorites: () => Promise<void>;
-  toggleFavorite: (stopId: number) => Promise<void>;
+  loadFavorites: (userId: number | null) => Promise<void>;
+  toggleFavorite: (userId: number, stopId: number) => Promise<void>;
 }
 
 const favoriteRepository = new FavoriteStopRepository();
 
-// Kolejki zapisów – osobna dla każdego przystanku.
-const favoriteWriteQueues = new Map<number, Promise<void>>();
+// Kolejki zapisów są osobne dla użytkownika i przystanku.
+const favoriteWriteQueues = new Map<string, Promise<void>>();
 
 // Ostatni stan ulubionych faktycznie zapisany w SQLite.
-const persistedFavoriteState = new Map<number, boolean>();
+const persistedFavoriteState = new Map<string, boolean>();
 
-// Numer najnowszej operacji dla danego przystanku.
-const favoriteOperationVersions = new Map<number, number>();
+// Numer najnowszej operacji dla użytkownika i przystanku.
+const favoriteOperationVersions = new Map<string, number>();
+
+// Chroni przed zastosowaniem wyników nieaktualnego pobierania.
+let favoriteLoadVersion = 0;
+
+function getFavoriteKey(userId: number, stopId: number): string {
+  return `${userId}:${stopId}`;
+}
 
 function updateFavoriteState(
   set: (
     partial: Partial<StopsState> | ((state: StopsState) => Partial<StopsState>),
   ) => void,
+  userId: number,
   stopId: number,
   isFavorite: boolean,
 ) {
   set((state) => {
+    // Nie zmieniaj listy, jeśli aktywne jest już inne konto.
+    if (state.favoriteUserId !== userId) {
+      return {};
+    }
+
     const alreadyFavorite = state.favoriteStopIds.includes(stopId);
 
     if (alreadyFavorite === isFavorite) {
@@ -58,6 +72,7 @@ export const useStopsStore = create<StopsState>((set, get) => ({
   stops: [],
   selectedStop: null,
   favoriteStopIds: [],
+  favoriteUserId: null,
   isLoading: false,
   error: null,
 
@@ -89,89 +104,128 @@ export const useStopsStore = create<StopsState>((set, get) => ({
     }
   },
 
-  loadFavorites: async () => {
-    try {
-      const favoriteStopIds = await favoriteRepository.getAll();
+  loadFavorites: async (userId) => {
+    const loadVersion = ++favoriteLoadVersion;
 
-      // Uzupełnienie informacji o stanie zapisanym w SQLite.
+    if (userId === null) {
+      set({
+        favoriteUserId: null,
+        favoriteStopIds: [],
+      });
+      return;
+    }
+
+    // Natychmiast wyczyść listę poprzedniego konta.
+    if (get().favoriteUserId !== userId) {
+      set({
+        favoriteUserId: userId,
+        favoriteStopIds: [],
+      });
+    }
+
+    try {
+      const favoriteStopIds = await favoriteRepository.getAll(userId);
+
+      // Ignoruj wynik, jeśli w międzyczasie zmieniło się konto
+      // lub rozpoczęto nowsze pobieranie.
+      if (
+        loadVersion !== favoriteLoadVersion ||
+        get().favoriteUserId !== userId
+      ) {
+        return;
+      }
+
       for (const stop of get().stops) {
-        if (!persistedFavoriteState.has(stop.stopId)) {
+        const key = getFavoriteKey(userId, stop.stopId);
+
+        if (!persistedFavoriteState.has(key)) {
           persistedFavoriteState.set(
-            stop.stopId,
+            key,
             favoriteStopIds.includes(stop.stopId),
           );
         }
       }
 
       for (const stopId of favoriteStopIds) {
-        persistedFavoriteState.set(stopId, true);
+        persistedFavoriteState.set(getFavoriteKey(userId, stopId), true);
       }
 
       set({ favoriteStopIds });
     } catch {
-      set({
-        error: "Nie udało się pobrać ulubionych przystanków.",
-      });
+      if (
+        loadVersion === favoriteLoadVersion &&
+        get().favoriteUserId === userId
+      ) {
+        set({
+          error: "Nie udało się pobrać ulubionych przystanków.",
+        });
+      }
     }
   },
 
-  toggleFavorite: async (stopId) => {
+  toggleFavorite: async (userId, stopId) => {
+    // Nie zapisuj ulubionych, dopóki nie jest aktywna lista tego konta.
+    if (get().favoriteUserId !== userId) {
+      await get().loadFavorites(userId);
+    }
+
+    if (get().favoriteUserId !== userId) {
+      return;
+    }
+
+    const key = getFavoriteKey(userId, stopId);
     const isFavorite = get().favoriteStopIds.includes(stopId);
     const desiredState = !isFavorite;
 
-    // Jeśli nie ma aktywnego zapisu, aktualny stan jest punktem wyjścia.
-    const previousQueue = favoriteWriteQueues.get(stopId);
+    const previousQueue = favoriteWriteQueues.get(key);
 
     if (!previousQueue) {
-      persistedFavoriteState.set(stopId, isFavorite);
+      persistedFavoriteState.set(key, isFavorite);
     }
-    // Każda nowa operacja otrzymuje wyższy numer.
-    const operationVersion = (favoriteOperationVersions.get(stopId) ?? 0) + 1;
 
-    favoriteOperationVersions.set(stopId, operationVersion);
+    const operationVersion = (favoriteOperationVersions.get(key) ?? 0) + 1;
+
+    favoriteOperationVersions.set(key, operationVersion);
 
     // Natychmiastowa aktualizacja interfejsu.
-    updateFavoriteState(set, stopId, desiredState);
+    updateFavoriteState(set, userId, stopId, desiredState);
     set({ error: null });
 
-    // Poczekaj na poprzedni zapis dla tego przystanku.
     const queue = previousQueue ?? Promise.resolve();
 
-    // Zapis zostanie wykonany dopiero po zakończeniu poprzedniego.
     const writePromise = queue.then(async () => {
       try {
         if (desiredState) {
-          await favoriteRepository.add(stopId);
+          await favoriteRepository.add(userId, stopId);
         } else {
-          await favoriteRepository.remove(stopId);
+          await favoriteRepository.remove(userId, stopId);
         }
 
-        // Aktualizacja ostatniego poprawnie zapisanego stanu.
-        persistedFavoriteState.set(stopId, desiredState);
+        persistedFavoriteState.set(key, desiredState);
       } catch {
-        // Starsza operacja nie może cofnąć nowszej zmiany.
         const isLatestOperation =
-          favoriteOperationVersions.get(stopId) === operationVersion;
+          favoriteOperationVersions.get(key) === operationVersion;
 
         if (isLatestOperation) {
-          const lastPersistedState =
-            persistedFavoriteState.get(stopId) ?? false;
+          const lastPersistedState = persistedFavoriteState.get(key) ?? false;
 
-          updateFavoriteState(set, stopId, lastPersistedState);
+          updateFavoriteState(set, userId, stopId, lastPersistedState);
 
-          set({
-            error: "Nie udało się zapisać zmian w ulubionych.",
-          });
+          if (get().favoriteUserId === userId) {
+            set({
+              error: "Nie udało się zapisać zmian w ulubionych.",
+            });
+          }
         }
       }
     });
 
-    favoriteWriteQueues.set(stopId, writePromise);
+    favoriteWriteQueues.set(key, writePromise);
 
     await writePromise;
-    // Usuń zakończoną kolejkę, jeśli nie zastąpiła jej nowsza operacja.
-    if (favoriteWriteQueues.get(stopId) === writePromise) {
-      favoriteWriteQueues.delete(stopId);
+
+    if (favoriteWriteQueues.get(key) === writePromise) {
+      favoriteWriteQueues.delete(key);
     }
   },
 }));

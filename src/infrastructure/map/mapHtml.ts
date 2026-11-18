@@ -40,7 +40,7 @@ export const MAP_HTML = `
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <script>
-    const map = L.map('map').setView([54.352, 18.646], 14);
+    const map = L.map('map').setView([54.352, 18.646], 15);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap contributors',

@@ -5,14 +5,19 @@ jest.mock("../src/data/repositories/FavoriteStopRepository");
 
 const mockedRepository = jest.mocked(FavoriteStopRepository);
 
+const USER_ID = 1;
+
 describe("Stops Store - Optimistic UI", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+
+    mockedRepository.prototype.getAll.mockResolvedValue([]);
 
     useStopsStore.setState({
       stops: [],
       selectedStop: null,
       favoriteStopIds: [],
+      favoriteUserId: USER_ID,
       isLoading: false,
       error: null,
     });
@@ -21,11 +26,13 @@ describe("Stops Store - Optimistic UI", () => {
   it("should update favorites immediately", async () => {
     mockedRepository.prototype.add.mockResolvedValue(undefined);
 
-    const promise = useStopsStore.getState().toggleFavorite(10);
+    const promise = useStopsStore.getState().toggleFavorite(USER_ID, 10);
 
     expect(useStopsStore.getState().favoriteStopIds).toEqual([10]);
 
     await promise;
+
+    expect(mockedRepository.prototype.add).toHaveBeenCalledWith(USER_ID, 10);
   });
 
   it("should rollback when saving favorite fails", async () => {
@@ -33,7 +40,7 @@ describe("Stops Store - Optimistic UI", () => {
       new Error("Database error"),
     );
 
-    await useStopsStore.getState().toggleFavorite(10);
+    await useStopsStore.getState().toggleFavorite(USER_ID, 10);
 
     expect(useStopsStore.getState().favoriteStopIds).toEqual([]);
     expect(useStopsStore.getState().error).toBe(
@@ -48,10 +55,10 @@ describe("Stops Store - Optimistic UI", () => {
 
     mockedRepository.prototype.remove.mockResolvedValue(undefined);
 
-    await useStopsStore.getState().toggleFavorite(10);
+    await useStopsStore.getState().toggleFavorite(USER_ID, 10);
 
     expect(useStopsStore.getState().favoriteStopIds).toEqual([]);
-    expect(mockedRepository.prototype.remove).toHaveBeenCalledWith(10);
+    expect(mockedRepository.prototype.remove).toHaveBeenCalledWith(USER_ID, 10);
   });
 
   it("should not rollback another stop when one save fails", async () => {
@@ -66,25 +73,23 @@ describe("Stops Store - Optimistic UI", () => {
       resolveSecond = resolve;
     });
 
-    mockedRepository.prototype.add.mockImplementation((stopId: number) => {
-      return stopId === 10 ? firstWrite : secondWrite;
-    });
+    mockedRepository.prototype.add.mockImplementation(
+      (_userId: number, stopId: number) => {
+        return stopId === 10 ? firstWrite : secondWrite;
+      },
+    );
 
-    const firstToggle = useStopsStore.getState().toggleFavorite(10);
-    const secondToggle = useStopsStore.getState().toggleFavorite(20);
+    const firstToggle = useStopsStore.getState().toggleFavorite(USER_ID, 10);
 
-    // Oba przystanki są od razu widoczne jako ulubione.
+    const secondToggle = useStopsStore.getState().toggleFavorite(USER_ID, 20);
+
     expect(useStopsStore.getState().favoriteStopIds).toEqual([10, 20]);
 
-    // Zapis pierwszego przystanku kończy się błędem.
     rejectFirst(new Error("Database error"));
-
-    // Zapis drugiego przystanku kończy się powodzeniem.
     resolveSecond();
 
     await Promise.all([firstToggle, secondToggle]);
 
-    // Błąd pierwszego zapisu nie cofa drugiego przystanku.
     expect(useStopsStore.getState().favoriteStopIds).toEqual([20]);
     expect(useStopsStore.getState().error).toBe(
       "Nie udało się zapisać zmian w ulubionych.",
@@ -101,29 +106,23 @@ describe("Stops Store - Optimistic UI", () => {
     mockedRepository.prototype.add.mockReturnValue(addPromise);
     mockedRepository.prototype.remove.mockResolvedValue(undefined);
 
-    // Pierwsze kliknięcie dodaje przystanek.
-    const firstToggle = useStopsStore.getState().toggleFavorite(10);
+    const firstToggle = useStopsStore.getState().toggleFavorite(USER_ID, 10);
 
-    // Drugie kliknięcie natychmiast go usuwa.
-    const secondToggle = useStopsStore.getState().toggleFavorite(10);
+    const secondToggle = useStopsStore.getState().toggleFavorite(USER_ID, 10);
 
-    // Interfejs od razu pokazuje końcowy stan.
     expect(useStopsStore.getState().favoriteStopIds).toEqual([]);
 
-    // Pozwalamy rozpocząć pierwszej operacji.
     await Promise.resolve();
 
-    expect(mockedRepository.prototype.add).toHaveBeenCalledWith(10);
+    expect(mockedRepository.prototype.add).toHaveBeenCalledWith(USER_ID, 10);
 
-    // Drugi zapis musi poczekać na pierwszy.
     expect(mockedRepository.prototype.remove).not.toHaveBeenCalled();
 
-    // Kończymy pierwszy zapis.
     resolveAdd();
 
     await Promise.all([firstToggle, secondToggle]);
 
-    expect(mockedRepository.prototype.remove).toHaveBeenCalledWith(10);
+    expect(mockedRepository.prototype.remove).toHaveBeenCalledWith(USER_ID, 10);
 
     expect(
       mockedRepository.prototype.add.mock.invocationCallOrder[0],

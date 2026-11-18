@@ -16,6 +16,7 @@ import { Departure } from "../../src/domain/entities/Departure";
 import { DepartureCard } from "../../src/components/DepartureCard";
 import { container } from "../../src/di/container";
 import { useStopsStore } from "../../src/store/useStopsStore";
+import { useAuthStore } from "../../src/store/useAuthStore";
 
 type StopFilter = "all" | "bus" | "tram" | "favorites";
 
@@ -25,6 +26,7 @@ export default function DeparturesScreen() {
   const isLoadingStops = useStopsStore((state) => state.isLoading);
   const stopsError = useStopsStore((state) => state.error);
   const favoriteStopIds = useStopsStore((state) => state.favoriteStopIds);
+  const userId = useAuthStore((state) => state.user?.id ?? null);
 
   const syncStops = useStopsStore((state) => state.syncStops);
   const selectStop = useStopsStore((state) => state.selectStop);
@@ -40,8 +42,8 @@ export default function DeparturesScreen() {
 
   useEffect(() => {
     syncStops();
-    loadFavorites();
-  }, [syncStops, loadFavorites]);
+    void loadFavorites(userId);
+  }, [syncStops, loadFavorites, userId]);
 
   const selectedStopId = selectedStop?.stopId;
 
@@ -142,7 +144,11 @@ export default function DeparturesScreen() {
 
         <TouchableOpacity
           style={styles.favoriteButton}
-          onPress={() => toggleFavorite(item.stopId)}
+          onPress={() => {
+            if (userId !== null) {
+              void toggleFavorite(userId, item.stopId);
+            }
+          }}
           activeOpacity={0.6}
         >
           <Text style={styles.favoriteIcon}>{isFavorite ? "★" : "☆"}</Text>

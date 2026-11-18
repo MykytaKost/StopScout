@@ -21,6 +21,7 @@ import { MAP_HTML } from "../../src/infrastructure/map/mapHtml";
 import { GeoBoundingBox } from "../../src/domain/value-objects/GeoBoundingBox";
 import { container } from "../../src/di/container";
 import { useStopsStore } from "../../src/store/useStopsStore";
+import { useAuthStore } from "../../src/store/useAuthStore";
 
 type MapBoundsMessage = {
   type: "MAP_BOUNDS";
@@ -64,10 +65,12 @@ export default function MapScreen() {
   const toggleFavorite = useStopsStore((state) => state.toggleFavorite);
   const favoriteStopIds = useStopsStore((state) => state.favoriteStopIds);
 
-  // Załaduj zapisane ulubione przystanki.
+  const userId = useAuthStore((state) => state.user?.id ?? null);
+
+  // Załaduj ulubione przystanki zalogowanego użytkownika.
   useEffect(() => {
-    void loadFavorites();
-  }, [loadFavorites]);
+    void loadFavorites(userId);
+  }, [loadFavorites, userId]);
 
   // Synchronizacja ulubionych przystanków z mapą Leaflet.
   useEffect(() => {
@@ -251,7 +254,7 @@ export default function MapScreen() {
           return;
         }
 
-        // Dodawanie przystanku do ulubionych.
+        // Dodawanie przystanku do ulubionych zalogowanego użytkownika.
         if (message.type === "ADD_FAVORITE") {
           if (
             typeof message.stopId !== "number" ||
@@ -261,7 +264,11 @@ export default function MapScreen() {
             return;
           }
 
-          await toggleFavorite(message.stopId);
+          if (userId === null) {
+            return;
+          }
+
+          await toggleFavorite(userId, message.stopId);
           return;
         }
 
@@ -309,7 +316,7 @@ export default function MapScreen() {
         console.error("Błąd obsługi wiadomości z mapy:", error);
       }
     },
-    [toggleFavorite, stops],
+    [toggleFavorite, stops, userId],
   );
 
   const handleCloseDepartures = useCallback(() => {
