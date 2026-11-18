@@ -99,20 +99,23 @@ export default function MapScreen() {
     }
   }, [isMapReady, stops.length]);
 
-  // Pobieranie odjazdów dla wybranego przystanku.
+  // Pobieranie i automatyczne odświeżanie odjazdów co 30 sekund.
   useEffect(() => {
     let isActive = true;
+    let isFetching = false;
+    let hasLoadedOnce = false;
 
     const loadDepartures = async () => {
-      if (!selectedMapStop) {
-        setDepartures([]);
-        setDeparturesError(null);
-        setIsLoadingDepartures(false);
+      if (!selectedMapStop || isFetching) {
         return;
       }
 
-      setIsLoadingDepartures(true);
-      setDepartures([]);
+      isFetching = true;
+
+      if (!hasLoadedOnce) {
+        setIsLoadingDepartures(true);
+      }
+
       setDeparturesError(null);
 
       try {
@@ -125,7 +128,6 @@ export default function MapScreen() {
         }
       } catch (error) {
         if (isActive) {
-          setDepartures([]);
           setDeparturesError(
             error instanceof Error
               ? error.message
@@ -133,16 +135,35 @@ export default function MapScreen() {
           );
         }
       } finally {
+        isFetching = false;
+        hasLoadedOnce = true;
+
         if (isActive) {
           setIsLoadingDepartures(false);
         }
       }
     };
 
+    if (!selectedMapStop) {
+      setDepartures([]);
+      setDeparturesError(null);
+      setIsLoadingDepartures(false);
+      return;
+    }
+
+    // Pierwsze pobranie od razu po wybraniu przystanku.
+    setDepartures([]);
+    setDeparturesError(null);
     void loadDepartures();
+
+    // Kolejne pobrania co 30 sekund.
+    const intervalId = setInterval(() => {
+      void loadDepartures();
+    }, 30_000);
 
     return () => {
       isActive = false;
+      clearInterval(intervalId);
     };
   }, [selectedMapStop]);
 
@@ -352,24 +373,33 @@ export default function MapScreen() {
           </View>
 
           <View style={styles.departuresContent}>
-            {isLoadingDepartures ? (
+            {isLoadingDepartures && departures.length === 0 ? (
               <View style={styles.statusContainer}>
                 <ActivityIndicator size="small" color="#1D4ED8" />
                 <Text style={styles.statusText}>Pobieranie odjazdów...</Text>
               </View>
+            ) : departures.length > 0 ? (
+              <>
+                <FlatList
+                  data={departures}
+                  keyExtractor={(item, index) =>
+                    `${selectedMapStop.stopId}-${item.routeId}-${index}`
+                  }
+                  renderItem={({ item }) => <DepartureCard departure={item} />}
+                  showsVerticalScrollIndicator
+                  nestedScrollEnabled
+                  contentContainerStyle={styles.departuresListContent}
+                />
+
+                {departuresError && (
+                  <Text style={styles.errorText}>
+                    Nie udało się odświeżyć odjazdów. Wyświetlane są poprzednie
+                    dane.
+                  </Text>
+                )}
+              </>
             ) : departuresError ? (
               <Text style={styles.errorText}>{departuresError}</Text>
-            ) : departures.length > 0 ? (
-              <FlatList
-                data={departures}
-                keyExtractor={(item, index) =>
-                  `${selectedMapStop.stopId}-${item.routeId}-${index}`
-                }
-                renderItem={({ item }) => <DepartureCard departure={item} />}
-                showsVerticalScrollIndicator
-                nestedScrollEnabled
-                contentContainerStyle={styles.departuresListContent}
-              />
             ) : (
               <Text style={styles.emptyDepartures}>
                 Brak dostępnych odjazdów.
