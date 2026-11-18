@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { WebView, WebViewMessageEvent } from "react-native-webview";
-
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MAP_HTML } from "../../src/infrastructure/map/mapHtml";
 import { GeoBoundingBox } from "../../src/domain/value-objects/GeoBoundingBox";
 import { container } from "../../src/di/container";
@@ -24,6 +25,7 @@ type AddFavoriteMessage = {
 type MapMessage = MapBoundsMessage | AddFavoriteMessage;
 
 export default function MapScreen() {
+  const insets = useSafeAreaInsets();
   const webViewRef = useRef<WebView<{}>>(null);
   const requestIdRef = useRef(0);
   const syncStartedRef = useRef(false);
@@ -36,11 +38,27 @@ export default function MapScreen() {
   const syncStops = useStopsStore((state) => state.syncStops);
   const loadFavorites = useStopsStore((state) => state.loadFavorites);
   const toggleFavorite = useStopsStore((state) => state.toggleFavorite);
+  const favoriteStopIds = useStopsStore(
+  (state) => state.favoriteStopIds
+);
 
   // Załaduj zapisane ulubione przystanki.
   useEffect(() => {
     void loadFavorites();
   }, [loadFavorites]);
+
+  // Synchronizacja ulubionych przystanków z mapą Leaflet.
+  useEffect(() => {
+    if (!isMapReady) {
+      return;
+    }
+
+    webViewRef.current?.injectJavaScript(
+      `window.updateFavoriteStops && window.updateFavoriteStops(${JSON.stringify(
+        favoriteStopIds
+      )}); true;`
+    );
+  }, [isMapReady, favoriteStopIds]);
 
   // Pobierz przystanki, jeśli nie zostały jeszcze zsynchronizowane.
   useEffect(() => {
@@ -184,7 +202,7 @@ export default function MapScreen() {
   );
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={["top"]}>
       <WebView<{}>
         ref={webViewRef}
         source={{ html: MAP_HTML }}
@@ -199,6 +217,7 @@ export default function MapScreen() {
       <Pressable
         style={[
           styles.locationButton,
+          { top: insets.top + 12 },
           isLocating && styles.locationButtonDisabled,
         ]}
         onPress={handleGetLocation}
@@ -210,20 +229,21 @@ export default function MapScreen() {
           {isLocating ? "Pobieranie..." : "◎ Moja lokalizacja"}
         </Text>
       </Pressable>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
+  flex: 1,
+  backgroundColor: "#FFFFFF",
   },
   map: {
     flex: 1,
   },
   locationButton: {
     position: "absolute",
-    top: 15,
+    top: 12,
     right: 15,
     backgroundColor: "#2563eb",
     paddingVertical: 12,

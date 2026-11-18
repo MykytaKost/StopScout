@@ -1,14 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
-  SafeAreaView,
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import { Stop } from "../../src/domain/entities/Stop";
 import { Departure } from "../../src/domain/entities/Departure";
@@ -16,12 +17,13 @@ import { DepartureCard } from "../../src/components/DepartureCard";
 import { container } from "../../src/di/container";
 import { useStopsStore } from "../../src/store/useStopsStore";
 
+type StopFilter = "all" | "favorites";
+
 export default function DeparturesScreen() {
   const stops = useStopsStore((state) => state.stops);
   const selectedStop = useStopsStore((state) => state.selectedStop);
   const isLoadingStops = useStopsStore((state) => state.isLoading);
   const stopsError = useStopsStore((state) => state.error);
-
   const favoriteStopIds = useStopsStore((state) => state.favoriteStopIds);
 
   const syncStops = useStopsStore((state) => state.syncStops);
@@ -33,42 +35,47 @@ export default function DeparturesScreen() {
   const [isLoadingDepartures, setIsLoadingDepartures] = useState(false);
   const [departuresError, setDeparturesError] = useState<string | null>(null);
 
-  const selectedStopId = selectedStop?.stopId ?? null;
+  const [searchQuery, setSearchQuery] = useState("");
+  const [stopFilter, setStopFilter] = useState<StopFilter>("all");
 
   useEffect(() => {
     syncStops();
-  }, [syncStops]);
-
-  useEffect(() => {
     loadFavorites();
-  }, [loadFavorites]);
+  }, [syncStops, loadFavorites]);
+
+  const selectedStopId = selectedStop?.stopId;
 
   useEffect(() => {
-    if (selectedStopId === null) {
-      setDepartures([]);
-      setDeparturesError(null);
-      return;
-    }
-
-    let cancelled = false;
+    let isActive = true;
 
     const loadDepartures = async () => {
+      if (!selectedStopId) {
+        setDepartures([]);
+        setDeparturesError(null);
+        return;
+      }
+
       setIsLoadingDepartures(true);
       setDeparturesError(null);
-      setDepartures([]);
 
       try {
-        const result = await container.getLiveDepartures.execute(selectedStopId);
+        const result =
+          await container.getLiveDepartures.execute(selectedStopId);
 
-        if (!cancelled) {
+        if (isActive) {
           setDepartures(result);
         }
-      } catch {
-        if (!cancelled) {
-          setDeparturesError("Nie udało się pobrać odjazdów z ZTM.");
+      } catch (error) {
+        if (isActive) {
+          setDepartures([]);
+          setDeparturesError(
+            error instanceof Error
+              ? error.message
+              : "Nie udało się pobrać odjazdów.",
+          );
         }
       } finally {
-        if (!cancelled) {
+        if (isActive) {
           setIsLoadingDepartures(false);
         }
       }
@@ -77,33 +84,45 @@ export default function DeparturesScreen() {
     loadDepartures();
 
     return () => {
-      cancelled = true;
+      isActive = false;
     };
   }, [selectedStopId]);
 
+  const filteredStops = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+
+    return stops.filter((stop) => {
+      const matchesFilter =
+        stopFilter === "all" || favoriteStopIds.includes(stop.stopId);
+
+      const matchesSearch =
+        query.length === 0 ||
+        stop.stopName.toLowerCase().includes(query) ||
+        String(stop.stopId).includes(query);
+
+      return matchesFilter && matchesSearch;
+    });
+  }, [stops, favoriteStopIds, stopFilter, searchQuery]);
+
   const renderStop = ({ item }: { item: Stop }) => {
-    const isSelected = selectedStop?.stopId === item.stopId;
     const isFavorite = favoriteStopIds.includes(item.stopId);
+    const isSelected = selectedStop?.stopId === item.stopId;
 
     return (
-      <View style={[styles.stopItem, isSelected && styles.selectedStopItem]}>
-        <TouchableOpacity
-          style={styles.stopMain}
-          onPress={() => selectStop(item)}
-          activeOpacity={0.7}
-        >
-          <View style={styles.stopTextContainer}>
-            <Text
-              style={[styles.stopName, isSelected && styles.selectedStopName]}
-            >
-              {item.stopName}
-            </Text>
+      <TouchableOpacity
+        style={[styles.stopCard, isSelected && styles.selectedStopCard]}
+        onPress={() => selectStop(item)}
+        activeOpacity={0.7}
+      >
+        <View style={styles.stopInfo}>
+          <Text style={styles.stopName}>{item.stopName}</Text>
 
-            <Text style={styles.stopId}>ID przystanku: {item.stopId}</Text>
-          </View>
+          <Text style={styles.stopId}>ID przystanku: {item.stopId}</Text>
 
-          {isSelected && <Text style={styles.selectedLabel}>WYBRANY</Text>}
-        </TouchableOpacity>
+          {isSelected && (
+            <Text style={styles.selectedLabel}>Wybrany przystanek</Text>
+          )}
+        </View>
 
         <TouchableOpacity
           style={styles.favoriteButton}
@@ -112,89 +131,134 @@ export default function DeparturesScreen() {
         >
           <Text style={styles.favoriteIcon}>{isFavorite ? "★" : "☆"}</Text>
         </TouchableOpacity>
-      </View>
+      </TouchableOpacity>
     );
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="dark-content" />
 
       <View style={styles.header}>
-        <Text style={styles.appName}>STOP SCOUT</Text>
+        <Text style={styles.appTitle}>STOP SCOUT</Text>
         <Text style={styles.subtitle}>Transport w Gdańsku</Text>
       </View>
 
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Przystanki ZTM Gdańsk</Text>
-
-        <Text style={styles.count}>{stops.length} przystanków</Text>
-      </View>
-
-      {isLoadingStops && stops.length === 0 && (
-        <View style={styles.center}>
+      {isLoadingStops && stops.length === 0 ? (
+        <View style={styles.centered}>
           <ActivityIndicator size="large" color="#1D4ED8" />
           <Text style={styles.loadingText}>Pobieranie przystanków...</Text>
         </View>
-      )}
-
-      {stopsError && (
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>{stopsError}</Text>
-
-          <TouchableOpacity style={styles.retryButton} onPress={syncStops}>
-            <Text style={styles.retryButtonText}>Spróbuj ponownie</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {stops.length > 0 && (
+      ) : (
         <>
-          <View style={styles.selectedInfo}>
-            <Text style={styles.selectedInfoLabel}>WYBRANY PRZYSTANEK</Text>
+          {stopsError && <Text style={styles.errorText}>{stopsError}</Text>}
 
-            <Text style={styles.selectedInfoName}>
-              {selectedStop
-                ? selectedStop.stopName
-                : "Wybierz przystanek z listy"}
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Przystanki ZTM Gdańsk</Text>
+
+            <Text style={styles.totalCount}>Łącznie: {stops.length}</Text>
+          </View>
+
+          <View style={styles.filterContainer}>
+            <View style={styles.filterButtons}>
+              <TouchableOpacity
+                style={[
+                  styles.filterButton,
+                  stopFilter === "all" && styles.activeFilterButton,
+                ]}
+                onPress={() => setStopFilter("all")}
+                activeOpacity={0.7}
+              >
+                <Text
+                  style={[
+                    styles.filterButtonText,
+                    stopFilter === "all" && styles.activeFilterButtonText,
+                  ]}
+                >
+                  Wszystkie ({stops.length})
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.filterButton,
+                  stopFilter === "favorites" && styles.activeFilterButton,
+                ]}
+                onPress={() => setStopFilter("favorites")}
+                activeOpacity={0.7}
+              >
+                <Text
+                  style={[
+                    styles.filterButtonText,
+                    stopFilter === "favorites" && styles.activeFilterButtonText,
+                  ]}
+                >
+                  ★ Ulubione ({favoriteStopIds.length})
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <TextInput
+              style={styles.searchInput}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholder="Szukaj przystanku lub ID..."
+              placeholderTextColor="#9CA3AF"
+              autoCapitalize="none"
+              autoCorrect={false}
+              clearButtonMode="while-editing"
+            />
+
+            <Text style={styles.filteredCount}>
+              Wyświetlono {filteredStops.length} z {stops.length} przystanków
             </Text>
           </View>
 
           <FlatList
-            data={stops}
+            data={filteredStops}
             keyExtractor={(item) => String(item.stopId)}
             renderItem={renderStop}
             contentContainerStyle={styles.list}
             style={styles.stopsList}
-            showsVerticalScrollIndicator={true}
+            showsVerticalScrollIndicator
+            keyboardShouldPersistTaps="handled"
+            ListEmptyComponent={
+              <View style={styles.emptyList}>
+                <Text style={styles.emptyListText}>
+                  {stopFilter === "favorites"
+                    ? "Nie masz jeszcze ulubionych przystanków."
+                    : "Nie znaleziono przystanków."}
+                </Text>
+              </View>
+            }
           />
 
           {selectedStop && (
             <View style={styles.departuresSection}>
-              <Text style={styles.departuresTitle}>Najbliższe odjazdy</Text>
+              <Text style={styles.departuresTitle}>
+                Odjazdy: {selectedStop.stopName}
+              </Text>
 
-              {isLoadingDepartures && (
-                <ActivityIndicator size="large" color="#1D4ED8" />
-              )}
-
-              {departuresError && (
+              {isLoadingDepartures ? (
+                <ActivityIndicator size="small" color="#1D4ED8" />
+              ) : departuresError ? (
                 <Text style={styles.errorText}>{departuresError}</Text>
-              )}
-
-              {!isLoadingDepartures &&
-                !departuresError &&
-                departures.length === 0 && (
-                  <Text style={styles.emptyText}>
-                    Brak aktualnych odjazdów.
-                  </Text>
-                )}
-
-              {departures.map((departure) => (
-                <DepartureCard
-                  key={String(departure.id)}
-                  departure={departure}
+              ) : departures.length > 0 ? (
+                <FlatList
+                  data={departures}
+                  keyExtractor={(item, index) =>
+                    `${selectedStop.stopId}-${index}`
+                  }
+                  renderItem={({ item }) => <DepartureCard departure={item} />}
+                  style={styles.departuresList}
+                  contentContainerStyle={styles.departuresListContent}
+                  nestedScrollEnabled
                 />
-              ))}
+              ) : (
+                <Text style={styles.emptyDepartures}>
+                  Brak dostępnych odjazdów.
+                </Text>
+              )}
             </View>
           )}
         </>
@@ -204,165 +268,225 @@ export default function DeparturesScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
+  safeArea: {
     flex: 1,
-    backgroundColor: "#F3F6FB",
+    backgroundColor: "#F3F4F6",
   },
-  stopsList: {
-    flex: 1,
-  },
+
   header: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 16,
     backgroundColor: "#FFFFFF",
-    paddingHorizontal: 22,
-    paddingTop: 20,
-    paddingBottom: 18,
     borderBottomWidth: 1,
     borderBottomColor: "#E5E7EB",
   },
-  appName: {
-    fontSize: 24,
-    fontWeight: "900",
+
+  appTitle: {
+    fontSize: 22,
+    fontWeight: "800",
     color: "#1D4ED8",
     letterSpacing: 1,
   },
+
   subtitle: {
-    marginTop: 4,
     fontSize: 14,
     color: "#6B7280",
+    marginTop: 3,
   },
+
   sectionHeader: {
-    paddingHorizontal: 18,
-    paddingTop: 18,
-    paddingBottom: 12,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 10,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
+
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: "800",
+    fontSize: 17,
+    fontWeight: "700",
     color: "#111827",
   },
-  count: {
+
+  totalCount: {
     fontSize: 12,
     color: "#6B7280",
   },
-  selectedInfo: {
-    marginHorizontal: 16,
-    marginBottom: 12,
-    padding: 16,
-    borderRadius: 14,
+
+  filterContainer: {
+    paddingHorizontal: 16,
+    marginBottom: 10,
+    gap: 10,
+  },
+
+  filterButtons: {
+    flexDirection: "row",
+    gap: 10,
+  },
+
+  filterButton: {
+    flex: 1,
+    paddingVertical: 11,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    alignItems: "center",
+  },
+
+  activeFilterButton: {
     backgroundColor: "#1D4ED8",
+    borderColor: "#1D4ED8",
   },
-  selectedInfoLabel: {
-    fontSize: 11,
+
+  filterButtonText: {
+    fontSize: 13,
     fontWeight: "700",
-    color: "#BFDBFE",
-    letterSpacing: 1,
+    color: "#374151",
   },
-  selectedInfoName: {
-    marginTop: 7,
-    fontSize: 18,
-    fontWeight: "800",
+
+  activeFilterButtonText: {
     color: "#FFFFFF",
   },
+
+  searchInput: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    fontSize: 14,
+    color: "#111827",
+  },
+
+  filteredCount: {
+    fontSize: 12,
+    color: "#6B7280",
+  },
+
+  stopsList: {
+    flex: 1,
+  },
+
   list: {
     paddingHorizontal: 16,
     paddingBottom: 12,
+    gap: 8,
   },
-  stopItem: {
+
+  stopCard: {
     backgroundColor: "#FFFFFF",
-    padding: 15,
     borderRadius: 12,
-    marginBottom: 9,
+    padding: 14,
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
     borderWidth: 1,
     borderColor: "#E5E7EB",
   },
-  selectedStopItem: {
+
+  selectedStopCard: {
     borderColor: "#1D4ED8",
-    borderWidth: 2,
+    backgroundColor: "#EFF6FF",
   },
-  stopMain: {
-    flex: 1,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  stopTextContainer: {
+
+  stopInfo: {
     flex: 1,
   },
+
   stopName: {
     fontSize: 15,
-    fontWeight: "700",
+    fontWeight: "600",
     color: "#111827",
   },
-  selectedStopName: {
-    color: "#1D4ED8",
-  },
+
   stopId: {
-    marginTop: 4,
     fontSize: 12,
     color: "#6B7280",
+    marginTop: 4,
   },
+
   selectedLabel: {
-    fontSize: 10,
-    fontWeight: "800",
+    fontSize: 11,
+    fontWeight: "700",
     color: "#1D4ED8",
+    marginTop: 5,
+  },
+
+  favoriteButton: {
+    width: 42,
+    height: 42,
+    alignItems: "center",
+    justifyContent: "center",
     marginLeft: 8,
   },
-  favoriteButton: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
+
   favoriteIcon: {
     fontSize: 27,
     color: "#F59E0B",
   },
-  center: {
+
+  emptyList: {
+    padding: 24,
+    alignItems: "center",
+  },
+
+  emptyListText: {
+    color: "#6B7280",
+    fontSize: 14,
+    textAlign: "center",
+  },
+
+  departuresSection: {
+    maxHeight: 260,
+    backgroundColor: "#FFFFFF",
+    borderTopWidth: 1,
+    borderTopColor: "#E5E7EB",
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 8,
+  },
+
+  departuresTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#111827",
+    marginBottom: 10,
+  },
+
+  departuresList: {
+    flexGrow: 0,
+  },
+
+  departuresListContent: {
+    paddingBottom: 8,
+  },
+
+  emptyDepartures: {
+    fontSize: 13,
+    color: "#6B7280",
+    paddingVertical: 8,
+  },
+
+  centered: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
   },
+
   loadingText: {
     marginTop: 12,
-    color: "#6B7280",
-  },
-  errorContainer: {
-    margin: 16,
-    padding: 16,
-    backgroundColor: "#FEE2E2",
-    borderRadius: 12,
-  },
-  errorText: {
-    color: "#B91C1C",
-  },
-  retryButton: {
-    marginTop: 12,
-    alignSelf: "flex-start",
-  },
-  retryButtonText: {
-    color: "#1D4ED8",
-    fontWeight: "700",
-  },
-  departuresSection: {
-    marginTop: 12,
-    marginHorizontal: 16,
-    padding: 14,
-    backgroundColor: "#FFFFFF",
-    borderRadius: 14,
-    gap: 12,
-  },
-  departuresTitle: {
-    fontSize: 18,
-    fontWeight: "800",
-    color: "#111827",
-    marginBottom: 4,
-  },
-  emptyText: {
-    color: "#6B7280",
     fontSize: 14,
+    color: "#6B7280",
+  },
+
+  errorText: {
+    color: "#DC2626",
+    fontSize: 13,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
   },
 });
