@@ -189,6 +189,20 @@ export const MAP_HTML = `
           '</div>'
         );
 
+        // Wybór przystanku po kliknięciu znacznika.
+        marker.on('click', function() {
+          if (!window.ReactNativeWebView) {
+            return;
+          }
+
+          window.ReactNativeWebView.postMessage(
+            JSON.stringify({
+              type: 'SELECT_STOP',
+              stopId: stopId
+            })
+          );
+        });
+
         // Obsługa kliknięcia po otwarciu popupu Leaflet.
         marker.on('popupopen', function(event) {
           const popupElement = event.popup.getElement();

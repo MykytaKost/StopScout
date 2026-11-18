@@ -1,8 +1,22 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { WebView, WebViewMessageEvent } from "react-native-webview";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
+
+import { Stop } from "../../src/domain/entities/Stop";
+import { Departure } from "../../src/domain/entities/Departure";
+import { DepartureCard } from "../../src/components/DepartureCard";
 import { MAP_HTML } from "../../src/infrastructure/map/mapHtml";
 import { GeoBoundingBox } from "../../src/domain/value-objects/GeoBoundingBox";
 import { container } from "../../src/di/container";
@@ -22,7 +36,12 @@ type AddFavoriteMessage = {
   stopId: number;
 };
 
-type MapMessage = MapBoundsMessage | AddFavoriteMessage;
+type SelectStopMessage = {
+  type: "SELECT_STOP";
+  stopId: number;
+};
+
+type MapMessage = MapBoundsMessage | AddFavoriteMessage | SelectStopMessage;
 
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
@@ -33,14 +52,17 @@ export default function MapScreen() {
   const [isMapReady, setIsMapReady] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
 
+  const [selectedMapStop, setSelectedMapStop] = useState<Stop | null>(null);
+  const [departures, setDepartures] = useState<Departure[]>([]);
+  const [isLoadingDepartures, setIsLoadingDepartures] = useState(false);
+  const [departuresError, setDeparturesError] = useState<string | null>(null);
+
   const stops = useStopsStore((state) => state.stops);
   const isLoading = useStopsStore((state) => state.isLoading);
   const syncStops = useStopsStore((state) => state.syncStops);
   const loadFavorites = useStopsStore((state) => state.loadFavorites);
   const toggleFavorite = useStopsStore((state) => state.toggleFavorite);
-  const favoriteStopIds = useStopsStore(
-  (state) => state.favoriteStopIds
-);
+  const favoriteStopIds = useStopsStore((state) => state.favoriteStopIds);
 
   // Załaduj zapisane ulubione przystanki.
   useEffect(() => {
@@ -55,8 +77,8 @@ export default function MapScreen() {
 
     webViewRef.current?.injectJavaScript(
       `window.updateFavoriteStops && window.updateFavoriteStops(${JSON.stringify(
-        favoriteStopIds
-      )}); true;`
+        favoriteStopIds,
+      )}); true;`,
     );
   }, [isMapReady, favoriteStopIds]);
 
@@ -76,6 +98,53 @@ export default function MapScreen() {
       );
     }
   }, [isMapReady, stops.length]);
+
+  // Pobieranie odjazdów dla wybranego przystanku.
+  useEffect(() => {
+    let isActive = true;
+
+    const loadDepartures = async () => {
+      if (!selectedMapStop) {
+        setDepartures([]);
+        setDeparturesError(null);
+        setIsLoadingDepartures(false);
+        return;
+      }
+
+      setIsLoadingDepartures(true);
+      setDepartures([]);
+      setDeparturesError(null);
+
+      try {
+        const result = await container.getLiveDepartures.execute(
+          selectedMapStop.stopId,
+        );
+
+        if (isActive) {
+          setDepartures(result);
+        }
+      } catch (error) {
+        if (isActive) {
+          setDepartures([]);
+          setDeparturesError(
+            error instanceof Error
+              ? error.message
+              : "Nie udało się pobrać odjazdów.",
+          );
+        }
+      } finally {
+        if (isActive) {
+          setIsLoadingDepartures(false);
+        }
+      }
+    };
+
+    void loadDepartures();
+
+    return () => {
+      isActive = false;
+    };
+  }, [selectedMapStop]);
 
   // Pobieranie aktualnej lokalizacji GPS.
   const handleGetLocation = useCallback(async () => {
@@ -114,7 +183,9 @@ export default function MapScreen() {
       ];
 
       webViewRef.current?.injectJavaScript(
-        `window.updateUserLocation && window.updateUserLocation(...${JSON.stringify(locationData)}); true;`,
+        `window.updateUserLocation && window.updateUserLocation(...${JSON.stringify(
+          locationData,
+        )}); true;`,
       );
     } catch (error) {
       console.error("Błąd pobierania lokalizacji:", error);
@@ -139,6 +210,25 @@ export default function MapScreen() {
         }
 
         const message = parsed as MapMessage;
+
+        // Wybór przystanku na mapie.
+        if (message.type === "SELECT_STOP") {
+          if (
+            typeof message.stopId !== "number" ||
+            !Number.isFinite(message.stopId) ||
+            !Number.isInteger(message.stopId)
+          ) {
+            return;
+          }
+
+          const stop = stops.find((item) => item.stopId === message.stopId);
+
+          if (stop) {
+            setSelectedMapStop(stop);
+          }
+
+          return;
+        }
 
         // Dodawanie przystanku do ulubionych.
         if (message.type === "ADD_FAVORITE") {
@@ -198,8 +288,12 @@ export default function MapScreen() {
         console.error("Błąd obsługi wiadomości z mapy:", error);
       }
     },
-    [toggleFavorite],
+    [toggleFavorite, stops],
   );
+
+  const handleCloseDepartures = useCallback(() => {
+    setSelectedMapStop(null);
+  }, []);
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
@@ -229,14 +323,69 @@ export default function MapScreen() {
           {isLocating ? "Pobieranie..." : "◎ Moja lokalizacja"}
         </Text>
       </Pressable>
+
+      {selectedMapStop && (
+        <View
+          style={[
+            styles.departuresPanel,
+            { bottom: Math.max(insets.bottom, 12) },
+          ]}
+        >
+          <View style={styles.panelHeader}>
+            <View style={styles.panelTitleContainer}>
+              <Text style={styles.panelTitle} numberOfLines={2}>
+                {selectedMapStop.stopName}
+              </Text>
+              <Text style={styles.panelSubtitle}>
+                ID przystanku: {selectedMapStop.stopId}
+              </Text>
+            </View>
+
+            <Pressable
+              onPress={handleCloseDepartures}
+              style={styles.closeButton}
+              accessibilityRole="button"
+              accessibilityLabel="Zamknij odjazdy"
+            >
+              <Text style={styles.closeButtonText}>✕</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.departuresContent}>
+            {isLoadingDepartures ? (
+              <View style={styles.statusContainer}>
+                <ActivityIndicator size="small" color="#1D4ED8" />
+                <Text style={styles.statusText}>Pobieranie odjazdów...</Text>
+              </View>
+            ) : departuresError ? (
+              <Text style={styles.errorText}>{departuresError}</Text>
+            ) : departures.length > 0 ? (
+              <FlatList
+                data={departures}
+                keyExtractor={(item, index) =>
+                  `${selectedMapStop.stopId}-${item.routeId}-${index}`
+                }
+                renderItem={({ item }) => <DepartureCard departure={item} />}
+                showsVerticalScrollIndicator
+                nestedScrollEnabled
+                contentContainerStyle={styles.departuresListContent}
+              />
+            ) : (
+              <Text style={styles.emptyDepartures}>
+                Brak dostępnych odjazdów.
+              </Text>
+            )}
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-  flex: 1,
-  backgroundColor: "#FFFFFF",
+    flex: 1,
+    backgroundColor: "#FFFFFF",
   },
   map: {
     flex: 1,
@@ -245,7 +394,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: 12,
     right: 15,
-    backgroundColor: "#2563eb",
+    backgroundColor: "#2563EB",
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 10,
@@ -255,8 +404,84 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   locationButtonText: {
-    color: "#ffffff",
+    color: "#FFFFFF",
     fontSize: 14,
     fontWeight: "600",
+  },
+  departuresPanel: {
+    position: "absolute",
+    left: 12,
+    right: 12,
+    maxHeight: "48%",
+    backgroundColor: "#F9FAFB",
+    borderRadius: 16,
+    padding: 14,
+    elevation: 8,
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+  },
+  panelHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  panelTitleContainer: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  panelTitle: {
+    fontSize: 17,
+    fontWeight: "800",
+    color: "#111827",
+  },
+  panelSubtitle: {
+    fontSize: 12,
+    color: "#6B7280",
+    marginTop: 4,
+  },
+  closeButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#E5E7EB",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  closeButtonText: {
+    color: "#374151",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  departuresContent: {
+    flexShrink: 1,
+    minHeight: 45,
+  },
+  departuresListContent: {
+    paddingBottom: 4,
+  },
+  statusContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 18,
+    gap: 10,
+  },
+  statusText: {
+    fontSize: 13,
+    color: "#6B7280",
+  },
+  emptyDepartures: {
+    fontSize: 13,
+    color: "#6B7280",
+    textAlign: "center",
+    paddingVertical: 18,
+  },
+  errorText: {
+    color: "#DC2626",
+    fontSize: 13,
+    paddingVertical: 12,
   },
 });
