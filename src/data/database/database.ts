@@ -18,7 +18,8 @@ export function getDatabase(): Promise<SQLite.SQLiteDatabase> {
           stopName TEXT NOT NULL,
           stopLat REAL NOT NULL,
           stopLon REAL NOT NULL,
-          notes TEXT NOT NULL DEFAULT ''
+          notes TEXT NOT NULL DEFAULT '',
+          type TEXT NOT NULL DEFAULT 'UNKNOWN'
         );
 
         CREATE TABLE IF NOT EXISTS favorite_stops (
@@ -33,6 +34,17 @@ export function getDatabase(): Promise<SQLite.SQLiteDatabase> {
           createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
       `);
+
+      const columns = await db.getAllAsync<{ name: string }>(
+        "PRAGMA table_info(stops)",
+      );
+
+      if (!columns.some((column) => column.name === "type")) {
+        await db.execAsync(`
+            ALTER TABLE stops
+            ADD COLUMN type TEXT NOT NULL DEFAULT 'UNKNOWN';
+          `);
+      }
 
       return db;
     })().catch((error) => {

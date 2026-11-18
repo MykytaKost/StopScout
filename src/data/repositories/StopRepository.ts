@@ -1,6 +1,6 @@
 import { Coordinates } from "../../domain/value-objects/Coordinates";
 import { GeoBoundingBox } from "../../domain/value-objects/GeoBoundingBox";
-import { Stop } from "../../domain/entities/Stop";
+import { Stop, StopType } from "../../domain/entities/Stop";
 import { getDatabase } from "../database/database";
 
 export class StopRepository {
@@ -11,14 +11,22 @@ export class StopRepository {
       for (const stop of stops) {
         await db.runAsync(
           `INSERT INTO stops
-            (stopId, stopName, stopLat, stopLon, notes)
-           VALUES (?, ?, ?, ?, ?)
+            (stopId, stopName, stopLat, stopLon, notes, type)
+           VALUES (?, ?, ?, ?, ?, ?)
            ON CONFLICT(stopId) DO UPDATE SET
              stopName = excluded.stopName,
              stopLat = excluded.stopLat,
              stopLon = excluded.stopLon,
-             notes = excluded.notes`,
-          [stop.stopId, stop.stopName, stop.stopLat, stop.stopLon, stop.notes],
+             notes = excluded.notes,
+             type = excluded.type`,
+          [
+            stop.stopId,
+            stop.stopName,
+            stop.stopLat,
+            stop.stopLon,
+            stop.notes,
+            stop.type,
+          ],
         );
       }
     });
@@ -37,12 +45,13 @@ export class StopRepository {
       stopLat: number;
       stopLon: number;
       notes: string;
+      type: StopType;
     }>(
       `SELECT *
-      FROM stops
-      WHERE stopLat BETWEEN ? AND ?
-        AND stopLon BETWEEN ? AND ?
-      ORDER BY stopName`,
+       FROM stops
+       WHERE stopLat BETWEEN ? AND ?
+         AND stopLon BETWEEN ? AND ?
+       ORDER BY stopName`,
       box.minLat,
       box.maxLat,
       box.minLon,
@@ -56,6 +65,7 @@ export class StopRepository {
           row.stopName,
           new Coordinates(row.stopLat, row.stopLon),
           row.notes,
+          row.type,
         ),
     );
   }

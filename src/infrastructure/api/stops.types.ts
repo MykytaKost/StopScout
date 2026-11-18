@@ -1,4 +1,3 @@
-
 export interface ZtmStopDto {
   stopId: number;
   stopCode: string;
@@ -7,7 +6,7 @@ export interface ZtmStopDto {
   stopDesc: string;
   stopLat: number;
   stopLon: number;
-  type: string;
+  type: "BUS" | "TRAM" | "BUS_TRAM" | "UNKNOWN";
   zoneId: number;
   zoneName: string;
   wheelchairBoarding: number;

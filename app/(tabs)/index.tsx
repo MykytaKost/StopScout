@@ -17,7 +17,7 @@ import { DepartureCard } from "../../src/components/DepartureCard";
 import { container } from "../../src/di/container";
 import { useStopsStore } from "../../src/store/useStopsStore";
 
-type StopFilter = "all" | "favorites";
+type StopFilter = "all" | "bus" | "tram" | "favorites";
 
 export default function DeparturesScreen() {
   const stops = useStopsStore((state) => state.stops);
@@ -92,8 +92,24 @@ export default function DeparturesScreen() {
     const query = searchQuery.trim().toLowerCase();
 
     return stops.filter((stop) => {
-      const matchesFilter =
-        stopFilter === "all" || favoriteStopIds.includes(stop.stopId);
+      let matchesFilter = false;
+
+      switch (stopFilter) {
+        case "bus":
+          matchesFilter = stop.type === "BUS" || stop.type === "BUS_TRAM";
+          break;
+
+        case "tram":
+          matchesFilter = stop.type === "TRAM" || stop.type === "BUS_TRAM";
+          break;
+
+        case "favorites":
+          matchesFilter = favoriteStopIds.includes(stop.stopId);
+          break;
+
+        default:
+          matchesFilter = true;
+      }
 
       const matchesSearch =
         query.length === 0 ||
@@ -182,6 +198,54 @@ export default function DeparturesScreen() {
               <TouchableOpacity
                 style={[
                   styles.filterButton,
+                  stopFilter === "bus" && styles.activeFilterButton,
+                ]}
+                onPress={() => setStopFilter("bus")}
+                activeOpacity={0.7}
+              >
+                <Text
+                  style={[
+                    styles.filterButtonText,
+                    stopFilter === "bus" && styles.activeFilterButtonText,
+                  ]}
+                >
+                  Autobusy (
+                  {
+                    stops.filter(
+                      (s) => s.type === "BUS" || s.type === "BUS_TRAM",
+                    ).length
+                  }
+                  )
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.filterButton,
+                  stopFilter === "tram" && styles.activeFilterButton,
+                ]}
+                onPress={() => setStopFilter("tram")}
+                activeOpacity={0.7}
+              >
+                <Text
+                  style={[
+                    styles.filterButtonText,
+                    stopFilter === "tram" && styles.activeFilterButtonText,
+                  ]}
+                >
+                  Tramwaje (
+                  {
+                    stops.filter(
+                      (s) => s.type === "TRAM" || s.type === "BUS_TRAM",
+                    ).length
+                  }
+                  )
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.filterButton,
                   stopFilter === "favorites" && styles.activeFilterButton,
                 ]}
                 onPress={() => setStopFilter("favorites")}
@@ -193,7 +257,7 @@ export default function DeparturesScreen() {
                     stopFilter === "favorites" && styles.activeFilterButtonText,
                   ]}
                 >
-                  ★ Ulubione ({favoriteStopIds.length})
+                  Ulubione ({favoriteStopIds.length})
                 </Text>
               </TouchableOpacity>
             </View>
@@ -227,7 +291,11 @@ export default function DeparturesScreen() {
                 <Text style={styles.emptyListText}>
                   {stopFilter === "favorites"
                     ? "Nie masz jeszcze ulubionych przystanków."
-                    : "Nie znaleziono przystanków."}
+                    : stopFilter === "bus"
+                      ? "Nie znaleziono przystanków autobusowych."
+                      : stopFilter === "tram"
+                        ? "Nie znaleziono przystanków tramwajowych."
+                        : "Nie znaleziono przystanków."}
                 </Text>
               </View>
             }
@@ -323,11 +391,13 @@ const styles = StyleSheet.create({
 
   filterButtons: {
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 10,
   },
 
   filterButton: {
     flex: 1,
+    minWidth: "47%",
     paddingVertical: 11,
     paddingHorizontal: 8,
     borderRadius: 10,
