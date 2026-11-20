@@ -1,54 +1,58 @@
+import { DepartureDelay } from "../src/domain/value-objects/DepartureDelay";
 
-import { DepartureDelay } from '../src/domain/value-objects/DepartureDelay';
+describe("DepartureDelay", () => {
+  test("treats zero, negative and missing delays as ON_TIME", () => {
+    const zero = new DepartureDelay(0);
+    const negative = new DepartureDelay(-45);
+    const missing = new DepartureDelay(null);
 
-describe('DepartureDelay', () => {
-  test('treats zero seconds as on time', () => {
-    const delay = new DepartureDelay(0);
+    expect(zero.severity).toBe("ON_TIME");
+    expect(zero.formattedText).toBe("Na czas");
+    expect(zero.shouldAnimate).toBe(false);
 
-    expect(delay.severity).toBe('ON_TIME');
-    expect(delay.formattedText).toBe('Na czas');
-    expect(delay.shouldAnimate).toBe(false);
+    expect(negative.seconds).toBe(0);
+    expect(negative.severity).toBe("ON_TIME");
+    expect(negative.shouldAnimate).toBe(false);
+
+    expect(missing.severity).toBe("ON_TIME");
+    expect(new DepartureDelay(undefined).severity).toBe("ON_TIME");
   });
 
-  test('does not animate at 119 seconds', () => {
-    const delay = new DepartureDelay(119);
+  test("classifies delays below 120 seconds as MINOR", () => {
+    const oneSecond = new DepartureDelay(1);
+    const almostTwoMinutes = new DepartureDelay(119);
 
-    expect(delay.severity).toBe('MINOR');
-    expect(delay.formattedText).toBe('+119s');
-    expect(delay.shouldAnimate).toBe(false);
+    expect(oneSecond.severity).toBe("MINOR");
+    expect(oneSecond.formattedText).toBe("+1s");
+    expect(oneSecond.shouldAnimate).toBe(false);
+
+    expect(almostTwoMinutes.severity).toBe("MINOR");
+    expect(almostTwoMinutes.formattedText).toBe("+119s");
+    expect(almostTwoMinutes.shouldAnimate).toBe(false);
   });
 
-  test('animates at exactly 120 seconds', () => {
-    const delay = new DepartureDelay(120);
+  test("classifies delays of at least 120 seconds as MAJOR", () => {
+    const twoMinutes = new DepartureDelay(120);
+    const almostThreeMinutes = new DepartureDelay(179);
+    const threeMinutes = new DepartureDelay(180);
 
-    expect(delay.severity).toBe('MAJOR');
-    expect(delay.formattedText).toBe('+2 min');
-    expect(delay.shouldAnimate).toBe(true);
+    expect(twoMinutes.severity).toBe("MAJOR");
+    expect(twoMinutes.formattedText).toBe("+2 min");
+    expect(twoMinutes.shouldAnimate).toBe(true);
+
+    expect(almostThreeMinutes.formattedText).toBe("+2 min");
+    expect(threeMinutes.formattedText).toBe("+3 min");
   });
 
-  test('formats 175 seconds as 2 minutes', () => {
-    const delay = new DepartureDelay(175);
-
-    expect(delay.formattedText).toBe('+2 min');
-    expect(delay.shouldAnimate).toBe(true);
-  });
-
-  test('treats negative delay as zero', () => {
-    const delay = new DepartureDelay(-30);
-
-    expect(delay.seconds).toBe(0);
-    expect(delay.severity).toBe('ON_TIME');
-    expect(delay.shouldAnimate).toBe(false);
-  });
-
-  test('handles missing and invalid delay values', () => {
-    expect(new DepartureDelay(null).seconds).toBe(0);
-    expect(new DepartureDelay(undefined).seconds).toBe(0);
+  test("handles invalid numeric values safely", () => {
     expect(new DepartureDelay(Number.NaN).seconds).toBe(0);
+    expect(new DepartureDelay(Infinity).seconds).toBe(0);
   });
 
-  test('compares delays by their seconds', () => {
+  test("compares delays by their seconds", () => {
     expect(new DepartureDelay(120).equals(new DepartureDelay(120))).toBe(true);
     expect(new DepartureDelay(120).equals(new DepartureDelay(180))).toBe(false);
+    expect(new DepartureDelay(120).equals(null)).toBe(false);
+    expect(new DepartureDelay(120).equals(undefined)).toBe(false);
   });
 });
